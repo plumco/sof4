@@ -67,24 +67,54 @@ st.markdown("""
 # ─── Data Loaders ──────────────────────────────────────────────────────────────
 EXCEL_FILE = Path(__file__).parent / "SO_FORMAT_PROJECT_-_APRIL_2026.xlsx"
 
+def get_excel_source():
+    """Return file path if exists, else bytes from session_state upload."""
+    if EXCEL_FILE.exists():
+        return str(EXCEL_FILE)
+    if "uploaded_excel" in st.session_state and st.session_state.uploaded_excel is not None:
+        return io.BytesIO(st.session_state.uploaded_excel)
+    return None
+
 @st.cache_data
-def load_product_master():
-    df = pd.read_excel(EXCEL_FILE, sheet_name="Product Master", header=0)
+def load_product_master(file_hash):
+    src = get_excel_source()
+    df = pd.read_excel(src, sheet_name="Product Master", header=0)
     df.columns = ["item_code","description","dn","moq","list_price","category","sub_group","hsn_code","gst_rate","cat2"]
     df = df.dropna(subset=["item_code"])
     df["search_label"] = df["item_code"].astype(str) + " │ " + df["description"].astype(str) + " │ DN" + df["dn"].astype(str)
     return df
 
 @st.cache_data
-def load_validations():
-    df = pd.read_excel(EXCEL_FILE, sheet_name="Data Validations", header=0)
+def load_validations(file_hash):
+    src = get_excel_source()
+    df = pd.read_excel(src, sheet_name="Data Validations", header=0)
     return df
 
 def get_list(df, col):
     return [str(v) for v in df[col].dropna().tolist()]
 
-products_df = load_product_master()
-val_df      = load_validations()
+# ─── File Upload Gate ──────────────────────────────────────────────────────────
+if not EXCEL_FILE.exists():
+    if "uploaded_excel" not in st.session_state or st.session_state.uploaded_excel is None:
+        st.markdown("""
+        <div style='background:#fff7ed;border:2px solid #f97316;border-radius:10px;padding:24px;max-width:560px;margin:60px auto;text-align:center'>
+          <h3 style='color:#c2410c;margin:0 0 8px'>📂 Upload Required</h3>
+          <p style='color:#7c2d12;font-size:0.9rem'>The master data file is not bundled in this deployment.<br>Upload it once to continue — not stored permanently.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        up = st.file_uploader(
+            "Upload SO_FORMAT_PROJECT_-_APRIL_2026.xlsx",
+            type=["xlsx"],
+            help="Upload the Huliot SO master Excel file"
+        )
+        if up:
+            st.session_state.uploaded_excel = up.read()
+            st.rerun()
+        st.stop()
+
+_file_hash = str(EXCEL_FILE) if EXCEL_FILE.exists() else str(len(st.session_state.get("uploaded_excel", b"")))
+products_df = load_product_master(_file_hash)
+val_df      = load_validations(_file_hash)
 
 sales_persons   = get_list(val_df, "Sales Person")
 payment_terms   = get_list(val_df, "Payment Terms")
@@ -460,7 +490,8 @@ with tab3:
     st.markdown('<div class="section-title">📥 Download</div>', unsafe_allow_html=True)
 
     def build_excel():
-        wb = load_workbook(EXCEL_FILE)
+        src = get_excel_source()
+        wb = load_workbook(src)
         ws = wb["Sales Order"]
 
         def w(cell, val):
