@@ -89,23 +89,40 @@ def load_product_master():
 @st.cache_data
 def load_validations():
     df = pd.read_excel(EXCEL_FILE, sheet_name="Data Validations", header=0)
+    df.columns = [c.strip() if isinstance(c, str) else c for c in df.columns]
     return df
 
 def get_list(df, col):
+    # Strip all column names before lookup — defensive against trailing spaces
+    df = df.copy()
+    df.columns = [c.strip() if isinstance(c, str) else c for c in df.columns]
+    col = col.strip()
+    if col not in df.columns:
+        return []
     return [str(v) for v in df[col].dropna().tolist()]
 
 products_df = load_product_master()
 val_df      = load_validations()
 
-sales_persons   = get_list(val_df, "Sales Person")
-payment_terms   = get_list(val_df, "Payment Terms")
-regions         = get_list(val_df, "Region")
-project_types   = get_list(val_df, "Project Type")
-customer_types  = get_list(val_df, "Customer Type")
-freight_terms   = get_list(val_df, "Freight Terms")
-order_validities = get_list(val_df, "Order Validity")
-rera_types      = get_list(val_df, "RERA")
-cd_options      = sorted([round(v, 2) for v in val_df["CD %"].dropna().tolist()])
+# Use iloc fallback for robustness — col index order matches Data Validations sheet
+_col = {c.strip(): i for i, c in enumerate(val_df.columns) if isinstance(c, str)}
+
+def _icol(name):
+    df = val_df.copy()
+    df.columns = [c.strip() if isinstance(c, str) else c for c in df.columns]
+    return [str(v) for v in df[name].dropna().tolist()] if name in df.columns else []
+
+sales_persons    = _icol("Sales Person")
+payment_terms    = _icol("Payment Terms")
+regions          = _icol("Region")
+project_types    = _icol("Project Type")
+customer_types   = _icol("Customer Type")
+freight_terms    = _icol("Freight Terms")
+order_validities = _icol("Order Validity")
+rera_types       = _icol("RERA")
+_cd_df = val_df.copy()
+_cd_df.columns = [c.strip() if isinstance(c, str) else c for c in _cd_df.columns]
+cd_options = sorted([round(v, 2) for v in _cd_df["CD %"].dropna().tolist()])
 
 # ─── Session State ─────────────────────────────────────────────────────────────
 def init_state():
