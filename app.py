@@ -321,27 +321,22 @@ FITTING_TYPES = {
 # ── DN sizes for drainage (integer sizes only for the size buttons)
 DRAIN_DNS = [40, 50, 75, 110, 125, 160, 200]
 
+def _kw_mask(series, kws):
+    import re as _re
+    pat = "|".join(_re.escape(k) for k in kws)
+    return series.astype(str).str.contains(pat, case=False, na=False, regex=True)
+
 def filter_by_line(df, line_key):
     if line_key == "All":
         return df
     kws = PRODUCT_LINES[line_key]
-    mask = df["sub_group"].astype(str).str.upper().apply(
-        lambda x: any(k.upper() in x for k in kws)
-    ) | df["category"].astype(str).str.upper().apply(
-        lambda x: any(k.upper() in x for k in kws)
-    )
-    return df[mask]
+    return df[_kw_mask(df["sub_group"], kws) | _kw_mask(df["category"], kws)]
 
 def filter_by_type(df, type_key):
     if type_key == "All" or FITTING_TYPES[type_key] is None:
         return df
     kws = FITTING_TYPES[type_key]
-    mask = df["category"].astype(str).str.upper().apply(
-        lambda x: any(k.upper() in x for k in kws)
-    ) | df["description"].astype(str).str.upper().apply(
-        lambda x: any(k.upper() in x for k in kws)
-    )
-    return df[mask]
+    return df[_kw_mask(df["category"], kws) | _kw_mask(df["description"], kws)]
 
 with tab2:
     # ── Session state for catalog filters
