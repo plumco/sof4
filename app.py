@@ -492,8 +492,19 @@ with tab3:
         wb = load_workbook(src)
         ws = wb["Sales Order"]
 
-        def w(cell, val):
-            ws[cell] = val
+        # Build lookup: any cell in a merged range → top-left cell of that range
+        _merge_map = {}
+        for rng in ws.merged_cells.ranges:
+            tl = ws.cell(rng.min_row, rng.min_col)  # top-left is writable
+            for row in range(rng.min_row, rng.max_row + 1):
+                for col in range(rng.min_col, rng.max_col + 1):
+                    _merge_map[(row, col)] = tl
+
+        def w(cell_addr, val):
+            c = ws[cell_addr]
+            # If it's a MergedCell, redirect to the top-left writable cell
+            target = _merge_map.get((c.row, c.column), c)
+            target.value = val
 
         # Header fields
         w("C6",  s.business_type)
@@ -538,26 +549,38 @@ with tab3:
         w("L21", s.site_name)
         w("C22", s.other_remark)
 
-        # Clear existing line item rows (25 to 102)
+        # Clear existing line item rows (25 to 102) — skip merged cells
+        from openpyxl.cell.cell import MergedCell
         for r in range(25, 103):
             for col in ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O"]:
-                ws[f"{col}{r}"] = None
+                c = ws[f"{col}{r}"]
+                if not isinstance(c, MergedCell):
+                    c.value = None
 
-        # Write line items
+        # Write line items — use w() so merged cells handled correctly
+        from openpyxl.cell.cell import MergedCell as _MC
+        def ws_safe(addr, val):
+            c = ws[addr]
+            if isinstance(c, _MC):
+                tl = _merge_map.get((c.row, c.column))
+                if tl: tl.value = val
+            else:
+                c.value = val
+
         for i, item in enumerate(s.line_items):
             r = 25 + i
             if r > 102:
                 break
             net_disc = round(1 - (1 - item["disc_pct"]) * (1 - s.cash_discount), 4)
             net_price = round(item["list_price"] * (1 - net_disc), 2)
-            ws[f"A{r}"] = i + 1
-            ws[f"B{r}"] = item["item_code"]
-            ws[f"C{r}"] = item["description"]
-            ws[f"D{r}"] = item["dn"]
-            ws[f"E{r}"] = item["category"]
-            ws[f"F{r}"] = item["moq"]
-            ws[f"G{r}"] = item["qty"]
-            ws[f"H{r}"] = item["hsn_code"]
+            ws_safe(f"A{r}", i + 1)
+            ws_safe(f"B{r}", item["item_code"])
+            ws_safe(f"C{r}", item["description"])
+            ws_safe(f"D{r}", item["dn"])
+            ws_safe(f"E{r}", item["category"])
+            ws_safe(f"F{r}", item["moq"])
+            ws_safe(f"G{r}", item["qty"])
+            ws_safe(f"H{r}", item["hsn_code"])
             ws[f"I{r}"] = item["list_price"]
             ws[f"J{r}"] = item["disc_pct"]
             ws[f"K{r}"] = s.cash_discount
