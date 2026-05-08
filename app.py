@@ -60,6 +60,10 @@ st.markdown("""
   .product-row { background: #fff; border-radius: 6px; padding: 10px; margin: 4px 0; border: 1px solid #e2ecfb; }
   .remove-btn > button { background: #dc2626 !important; padding: 4px 12px !important; font-size: 0.8rem !important; }
   div[data-testid="stDataEditor"] { border-radius: 8px; }
+  /* Hide Streamlit ghost empty containers */
+  div[data-testid="stVerticalBlock"] > div:empty { display:none!important; }
+  .stElementContainer:empty { display:none!important; }
+  iframe[height="0"] { display:none!important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -357,6 +361,85 @@ with tab2:
                 st.rerun()
     elif search_q:
         st.info("No products found. Try different keywords.")
+
+    st.markdown("---")
+
+    # ── Bulk Paste from Excel ──────────────────────────────────────────────────
+    with st.expander("📋 Bulk Add — Paste from Excel", expanded=False):
+        st.caption("Copy two columns from your Excel (Item Code | Qty) → paste below → click Import")
+
+        # Editable grid: user fills Item Code + Qty
+        _blank_rows = [{"Item Code": "", "Qty": 1} for _ in range(10)]
+        if "paste_grid" not in st.session_state:
+            st.session_state.paste_grid = _blank_rows.copy()
+
+        edited = st.data_editor(
+            st.session_state.paste_grid,
+            num_rows="dynamic",
+            use_container_width=True,
+            column_config={
+                "Item Code": st.column_config.TextColumn("Item Code", help="Paste item code from Excel", width="medium"),
+                "Qty":       st.column_config.NumberColumn("Qty", min_value=1, step=1, width="small"),
+            },
+            key="paste_editor",
+            height=280,
+        )
+        st.session_state.paste_grid = edited
+
+        col_imp, col_clr = st.columns([1, 4])
+        with col_imp:
+            if st.button("📥 Import Rows", type="primary"):
+                added, skipped = 0, []
+                cd = st.session_state.cash_discount
+                for row in edited:
+                    code = str(row.get("Item Code", "") or "").strip().upper()
+                    qty  = int(row.get("Qty") or 1)
+                    if not code:
+                        continue
+                    # Match in product master (case-insensitive)
+                    match = products_df[products_df["item_code"].str.upper() == code]
+                    if match.empty:
+                        # Try partial
+                        match = products_df[products_df["item_code"].str.upper().str.contains(code, na=False)]
+                    if match.empty:
+                        skipped.append(code)
+                        continue
+                    prod = match.iloc[0]
+                    disc_key  = f"disc_{prod['item_code']}"
+                    disc_val  = st.session_state.get(disc_key, 0.52)
+                    net_disc  = round(1 - (1 - disc_val) * (1 - cd), 4)
+                    net_price = round(prod["list_price"] * (1 - net_disc), 2)
+                    existing  = [i for i, it in enumerate(st.session_state.line_items)
+                                 if it["item_code"] == prod["item_code"]]
+                    if existing:
+                        st.session_state.line_items[existing[0]]["qty"] += qty
+                    else:
+                        st.session_state.line_items.append({
+                            "item_code":   prod["item_code"],
+                            "description": prod["description"],
+                            "dn":          prod["dn"],
+                            "category":    prod["category"],
+                            "sub_group":   prod["sub_group"],
+                            "moq":         int(prod["moq"]),
+                            "qty":         qty,
+                            "hsn_code":    prod["hsn_code"],
+                            "list_price":  prod["list_price"],
+                            "disc_pct":    disc_val,
+                            "cash_disc":   cd,
+                            "net_disc":    net_disc,
+                            "net_price":   net_price,
+                        })
+                    added += 1
+                msg = f"✅ {added} item(s) imported."
+                if skipped:
+                    msg += f"  ⚠️ Not found: {', '.join(skipped)}"
+                st.toast(msg)
+                st.session_state.paste_grid = _blank_rows.copy()
+                st.rerun()
+        with col_clr:
+            if st.button("🔄 Clear Grid"):
+                st.session_state.paste_grid = _blank_rows.copy()
+                st.rerun()
 
     st.markdown("---")
 
