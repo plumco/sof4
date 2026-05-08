@@ -338,6 +338,139 @@ def filter_by_type(df, type_key):
     kws = FITTING_TYPES[type_key]
     return df[_kw_mask(df["category"], kws) | _kw_mask(df["description"], kws)]
 
+
+def _safe_int(v):
+    try:
+        if pd.isna(v):
+            return None
+        return int(float(v))
+    except Exception:
+        return None
+
+def get_available_dns(df):
+    dns = sorted({d for d in df["dn"].apply(_safe_int).tolist() if d is not None})
+    return dns
+
+def get_sub_groups_for_line(df):
+    groups = [str(v).strip() for v in df["sub_group"].dropna().unique().tolist() if str(v).strip()]
+    return sorted(groups)
+
+def render_product_picker(view_base_df, li, sub_i, show_dn=True):
+    """Render SELECT SIZE DN, fitting filters, search and add buttons for one Sub Group tab."""
+    if "cat_dn"     not in st.session_state: st.session_state.cat_dn     = "ALL"
+    if "cat_type"   not in st.session_state: st.session_state.cat_type   = "All"
+    if "cat_search" not in st.session_state: st.session_state.cat_search = ""
+
+    # ── SELECT SIZE DN tabs/buttons from actual product data
+    if show_dn:
+        available_dns = get_available_dns(view_base_df)
+        st.markdown("**SELECT SIZE DN**")
+        dn_cols = st.columns(max(len(available_dns) + 1, 1))
+        all_count = len(view_base_df)
+        btn_style_all = "primary" if st.session_state.cat_dn == "ALL" else "secondary"
+        if dn_cols[0].button(f"ALL {all_count}", key=f"dn_ALL_{li}_{sub_i}", type=btn_style_all):
+            st.session_state.cat_dn = "ALL"
+            st.rerun()
+        for ci, dn in enumerate(available_dns):
+            cnt = len(view_base_df[view_base_df["dn"].apply(_safe_int) == dn])
+            btn_style = "primary" if st.session_state.cat_dn == str(dn) else "secondary"
+            if dn_cols[ci+1].button(f"DN{dn} {cnt}", key=f"dn_{dn}_{li}_{sub_i}", type=btn_style):
+                st.session_state.cat_dn = str(dn)
+                st.rerun()
+        st.markdown("")
+
+    # ── Fitting type pills
+    type_cols = st.columns(len(FITTING_TYPES))
+    type_icons = {"All":"🔵","Pipe":"□","Bend":"↩","Branch":"⌥","Trap":"⊔",
+                  "Coupler":"○","Reducer":"◁","Inspection":"⊙","Clamp":"∩","Accessory":"⚙"}
+    for ti, tkey in enumerate(FITTING_TYPES.keys()):
+        ico = type_icons.get(tkey, "•")
+        btn_t = "primary" if st.session_state.cat_type == tkey else "secondary"
+        if type_cols[ti].button(f"{ico} {tkey}", key=f"type_{tkey}_{li}_{sub_i}", type=btn_t):
+            st.session_state.cat_type = tkey
+            st.rerun()
+
+    search_q = st.text_input("🔍 Search item code, description, size...",
+                              value=st.session_state.cat_search,
+                              key=f"cat_search_{li}_{sub_i}",
+                              label_visibility="collapsed",
+                              placeholder="Search item code, description, size...")
+    if search_q != st.session_state.cat_search:
+        st.session_state.cat_search = search_q
+
+    st.markdown("")
+
+    view_df = view_base_df.copy()
+    if show_dn and st.session_state.cat_dn != "ALL":
+        try:
+            dn_val = int(st.session_state.cat_dn)
+            view_df = view_df[view_df["dn"].apply(_safe_int) == dn_val]
+        except ValueError:
+            pass
+    view_df = filter_by_type(view_df, st.session_state.cat_type)
+    if search_q:
+        sq = search_q.lower()
+        view_df = view_df[
+            view_df["item_code"].astype(str).str.lower().str.contains(sq, na=False) |
+            view_df["description"].astype(str).str.lower().str.contains(sq, na=False) |
+            view_df["sub_group"].astype(str).str.lower().str.contains(sq, na=False) |
+            view_df["dn"].astype(str).str.lower().str.contains(sq, na=False)
+        ]
+
+    st.caption(f"Showing {min(len(view_df),80)} of {len(view_df)} items")
+
+    if not view_df.empty:
+        hdr = st.columns([3, 1.5, 0.8, 0.8, 1.0, 0.8, 1.0])
+        for h, t in zip(hdr, ["Description", "Sub Group", "DN", "MOQ", "List ₹", "Disc%", ""]):
+            h.markdown(f"<small><b>{t}</b></small>", unsafe_allow_html=True)
+
+        for _, row in view_df.head(80).iterrows():
+            cols = st.columns([3, 1.5, 0.8, 0.8, 1.0, 0.8, 1.0])
+            cols[0].markdown(
+                f"<small><b style='color:#1a3a6b'>{row['item_code']}</b><br>"
+                f"{str(row['description'])[:60]}</small>", unsafe_allow_html=True)
+            cols[1].markdown(f"<small>{str(row['sub_group'])[:20]}</small>", unsafe_allow_html=True)
+            cols[2].write(str(row['dn']))
+            cols[3].write(str(int(row['moq'])))
+            cols[4].write(f"₹{row['list_price']:,0f}")
+            disc_key = f"disc_{row['item_code']}"
+            if disc_key not in st.session_state:
+                st.session_state[disc_key] = 0.52
+            disc_val = cols[5].number_input("", min_value=0.0, max_value=0.99, step=0.01,
+                                             value=st.session_state[disc_key],
+                                             key=f"di_{row['item_code']}_{li}_{sub_i}",
+                                             label_visibility="collapsed", format="%.2f")
+            st.session_state[disc_key] = disc_val
+            if cols[6].button("➕ Add", key=f"add_{row['item_code']}_{li}_{sub_i}"):
+                existing = [i for i, it in enumerate(st.session_state.line_items)
+                            if it["item_code"] == row["item_code"]]
+                if existing:
+                    st.session_state.line_items[existing[0]]["qty"] += int(row["moq"])
+                    st.toast(f"Qty updated: {row['item_code']}", icon="✅")
+                else:
+                    cd       = st.session_state.cash_discount
+                    net_disc = round(1 - (1 - disc_val) * (1 - cd), 4)
+                    net_price= round(row["list_price"] * (1 - net_disc), 2)
+                    st.session_state.line_items.append({
+                        "item_code":   row["item_code"],
+                        "description": row["description"],
+                        "dn":          row["dn"],
+                        "category":    row["category"],
+                        "sub_group":   row["sub_group"],
+                        "moq":         int(row["moq"]),
+                        "qty":         int(row["moq"]),
+                        "hsn_code":    row["hsn_code"],
+                        "list_price":  row["list_price"],
+                        "disc_pct":    disc_val,
+                        "cash_disc":   cd,
+                        "net_disc":    net_disc,
+                        "net_price":   net_price,
+                    })
+                    st.toast(f"Added: {row['item_code']}", icon="✅")
+                st.rerun()
+    else:
+        st.info("No items match the selected filters.")
+
 with tab2:
     # ── Session state for catalog filters
     if "cat_line"   not in st.session_state: st.session_state.cat_line   = "HT Pro"
@@ -356,118 +489,25 @@ with tab2:
             line_key = line_options[li]
             line_df  = filter_by_line(products_df, line_key) if line_key != "All" else products_df
 
-            # ── DN size buttons (only for drainage lines)
-            show_dn = line_key in ("HT Pro", "Ultra Silent", "All")
-            if show_dn:
-                st.markdown("**SELECT SIZE (DN)**")
-                dn_cols = st.columns(len(DRAIN_DNS) + 1)
-                all_count = len(line_df[line_df["dn"].apply(lambda x: x in DRAIN_DNS)])
-                # ALL button
-                btn_style_all = "primary" if st.session_state.cat_dn == "ALL" else "secondary"
-                if dn_cols[0].button(f"ALL {all_count}", key=f"dn_ALL_{li}", type=btn_style_all):
-                    st.session_state.cat_dn = "ALL"
-                    st.rerun()
-                for ci, dn in enumerate(DRAIN_DNS):
-                    cnt = len(line_df[line_df["dn"] == dn])
-                    btn_style = "primary" if st.session_state.cat_dn == str(dn) else "secondary"
-                    if dn_cols[ci+1].button(f"DN{dn} {cnt}", key=f"dn_{dn}_{li}", type=btn_style):
-                        st.session_state.cat_dn = str(dn)
-                        st.rerun()
-                st.markdown("")
+            # Product Sub Group tabs are created from actual Product Master data.
+            # This helps the user first select Sub Group, then select the available DN size.
+            sub_groups = get_sub_groups_for_line(line_df)
+            sub_labels = ["All Sub Groups"] + sub_groups
 
-            # ── Fitting type pills
-            type_cols = st.columns(len(FITTING_TYPES))
-            type_icons = {"All":"🔵","Pipe":"□","Bend":"↩","Branch":"⌥","Trap":"⊔",
-                          "Coupler":"○","Reducer":"◁","Inspection":"⊙","Clamp":"∩","Accessory":"⚙"}
-            for ti, tkey in enumerate(FITTING_TYPES.keys()):
-                ico = type_icons.get(tkey, "•")
-                btn_t = "primary" if st.session_state.cat_type == tkey else "secondary"
-                if type_cols[ti].button(f"{ico} {tkey}", key=f"type_{tkey}_{li}", type=btn_t):
-                    st.session_state.cat_type = tkey
-                    st.rerun()
+            st.markdown("**PRODUCT SUB GROUP**")
+            sub_tabs = st.tabs(sub_labels)
 
-            # ── Search bar
-            search_q = st.text_input("🔍 Search item code, description, size...",
-                                      value=st.session_state.cat_search,
-                                      key=f"cat_search_{li}",
-                                      label_visibility="collapsed",
-                                      placeholder="Search item code, description, size...")
-            if search_q != st.session_state.cat_search:
-                st.session_state.cat_search = search_q
+            for sub_i, sub_tab in enumerate(sub_tabs):
+                with sub_tab:
+                    sub_key = sub_labels[sub_i]
+                    if sub_key == "All Sub Groups":
+                        sub_df = line_df.copy()
+                    else:
+                        sub_df = line_df[line_df["sub_group"].astype(str).str.strip() == sub_key].copy()
 
-            st.markdown("")
-
-            # ── Apply filters
-            view_df = line_df.copy()
-            if show_dn and st.session_state.cat_dn != "ALL":
-                try:
-                    dn_val = int(st.session_state.cat_dn)
-                    view_df = view_df[view_df["dn"] == dn_val]
-                except ValueError:
-                    pass
-            view_df = filter_by_type(view_df, st.session_state.cat_type)
-            if search_q:
-                sq = search_q.lower()
-                view_df = view_df[
-                    view_df["item_code"].astype(str).str.lower().str.contains(sq, na=False) |
-                    view_df["description"].astype(str).str.lower().str.contains(sq, na=False) |
-                    view_df["dn"].astype(str).str.lower().str.contains(sq, na=False)
-                ]
-
-            st.caption(f"Showing {min(len(view_df),80)} of {len(view_df)} items")
-
-            if not view_df.empty:
-                # Header row
-                hdr = st.columns([3, 1.5, 0.8, 0.8, 1.0, 0.8, 1.0])
-                for h, t in zip(hdr, ["Description", "Sub Group", "DN", "MOQ", "List ₹", "Disc%", ""]):
-                    h.markdown(f"<small><b>{t}</b></small>", unsafe_allow_html=True)
-
-                for _, row in view_df.head(80).iterrows():
-                    cols = st.columns([3, 1.5, 0.8, 0.8, 1.0, 0.8, 1.0])
-                    cols[0].markdown(
-                        f"<small><b style='color:#1a3a6b'>{row['item_code']}</b><br>"
-                        f"{row['description'][:60]}</small>", unsafe_allow_html=True)
-                    cols[1].markdown(f"<small>{str(row['sub_group'])[:20]}</small>", unsafe_allow_html=True)
-                    cols[2].write(str(row['dn']))
-                    cols[3].write(str(int(row['moq'])))
-                    cols[4].write(f"₹{row['list_price']:,.0f}")
-                    disc_key = f"disc_{row['item_code']}"
-                    if disc_key not in st.session_state:
-                        st.session_state[disc_key] = 0.52
-                    disc_val = cols[5].number_input("", min_value=0.0, max_value=0.99, step=0.01,
-                                                     value=st.session_state[disc_key],
-                                                     key=f"di_{row['item_code']}_{li}",
-                                                     label_visibility="collapsed", format="%.2f")
-                    st.session_state[disc_key] = disc_val
-                    if cols[6].button("➕ Add", key=f"add_{row['item_code']}_{li}"):
-                        existing = [i for i, it in enumerate(st.session_state.line_items)
-                                    if it["item_code"] == row["item_code"]]
-                        if existing:
-                            st.session_state.line_items[existing[0]]["qty"] += int(row["moq"])
-                            st.toast(f"Qty updated: {row['item_code']}", icon="✅")
-                        else:
-                            cd       = st.session_state.cash_discount
-                            net_disc = round(1 - (1 - disc_val) * (1 - cd), 4)
-                            net_price= round(row["list_price"] * (1 - net_disc), 2)
-                            st.session_state.line_items.append({
-                                "item_code":   row["item_code"],
-                                "description": row["description"],
-                                "dn":          row["dn"],
-                                "category":    row["category"],
-                                "sub_group":   row["sub_group"],
-                                "moq":         int(row["moq"]),
-                                "qty":         int(row["moq"]),
-                                "hsn_code":    row["hsn_code"],
-                                "list_price":  row["list_price"],
-                                "disc_pct":    disc_val,
-                                "cash_disc":   cd,
-                                "net_disc":    net_disc,
-                                "net_price":   net_price,
-                            })
-                            st.toast(f"Added: {row['item_code']}", icon="✅")
-                        st.rerun()
-            else:
-                st.info("No items match the selected filters.")
+                    # Show DN selector only when the selected data has DN values.
+                    show_dn = len(get_available_dns(sub_df)) > 0
+                    render_product_picker(sub_df, li, sub_i, show_dn=show_dn)
 
     st.markdown("---")
 
