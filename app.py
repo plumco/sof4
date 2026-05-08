@@ -571,120 +571,105 @@ with tab3:
     st.markdown('<div class="section-title">📥 Download</div>', unsafe_allow_html=True)
 
     def build_excel():
-        src = EXCEL_FILE
-        wb = load_workbook(src)
+        from openpyxl.cell.cell import MergedCell
+
+        wb = load_workbook(EXCEL_FILE)   # formulas preserved (data_only=False default)
         ws = wb["Sales Order"]
 
-        # Build lookup: any cell in a merged range → top-left cell of that range
+        # ── Merged-cell safe writer ───────────────────────────────────────────
+        # Build map: every cell coordinate → top-left writable cell of its range
         _merge_map = {}
         for rng in ws.merged_cells.ranges:
-            tl = ws.cell(rng.min_row, rng.min_col)  # top-left is writable
+            tl = ws.cell(rng.min_row, rng.min_col)
             for row in range(rng.min_row, rng.max_row + 1):
                 for col in range(rng.min_col, rng.max_col + 1):
                     _merge_map[(row, col)] = tl
 
-        def w(cell_addr, val):
-            c = ws[cell_addr]
-            # If it's a MergedCell, redirect to the top-left writable cell
-            target = _merge_map.get((c.row, c.column), c)
-            target.value = val
-
-        # Header fields
-        w("C6",  s.business_type)
-        w("F6",  s.sales_person)
-        w("J6",  s.po_no)
-        w("N6",  s.po_date.strftime("%d.%m.%Y"))
-
-        w("C7",  s.business_segment)
-        w("F7",  s.rera_no)
-        w("J7",  s.order_validity)
-
-        w("C8",  s.customer_po_no)
-        w("J8",  s.so_no)
-        w("N8",  s.order_date.strftime("%d.%m.%Y"))
-
-        w("C9",  s.bitrix_id)
-        w("F9",  s.customer_type)
-        w("J9",  s.contact_person)
-        w("N9",  s.contact_mobile)
-
-        # Bill to
-        w("B11", s.bill_name)
-        w("B12", s.bill_address)
-        w("B14", s.bill_city)
-        w("B15", s.bill_pin)
-        w("B16", s.bill_gstin)
-
-        # Ship to
-        w("I11", s.ship_name)
-        w("I12", s.ship_address)
-        w("I14", s.ship_city)
-        w("I15", s.ship_pin)
-        w("I16", s.ship_gstin)
-
-        w("C17", s.cash_discount)
-        w("C18", s.freight)
-        w("C19", s.payment_term)
-
-        w("D20", s.consultant_name)
-        w("L20", s.consultant_contact)
-        w("D21", s.developer_name)
-        w("L21", s.site_name)
-        w("C22", s.other_remark)
-
-        # Clear existing line item rows (25 to 102) — skip merged cells
-        from openpyxl.cell.cell import MergedCell
-        for r in range(25, 103):
-            for col in ["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O"]:
-                c = ws[f"{col}{r}"]
-                if not isinstance(c, MergedCell):
-                    c.value = None
-
-        # Write line items — use w() so merged cells handled correctly
-        from openpyxl.cell.cell import MergedCell as _MC
-        def ws_safe(addr, val):
+        def w(addr, val):
+            """Write val to addr, redirecting MergedCells to top-left."""
             c = ws[addr]
-            if isinstance(c, _MC):
-                tl = _merge_map.get((c.row, c.column))
-                if tl: tl.value = val
-            else:
-                c.value = val
+            target = _merge_map.get((c.row, c.column), c)
+            if not isinstance(target, MergedCell):
+                target.value = val
 
+        # ── INPUT-ONLY header fields (no formula cells touched) ───────────────
+        # Row 6
+        w("C6",  s.business_type)      # Business Type  (input)
+        w("F6",  s.sales_person)        # Sales Person   (input, merged F6:G6)
+        w("J6",  s.po_no)               # PO No          (input)
+        w("N6",  s.po_date.strftime("%d.%m.%Y"))  # PO Date
+
+        # Row 7
+        w("C7",  s.business_segment)   # Business Segment (input)
+        w("F7",  s.rera_no)             # RERA No          (input, merged F7:G7)
+        w("J7",  s.order_validity)      # Order Validity   (input)
+
+        # Row 8  — NOTE: F8 = formula =N100 (total), do NOT touch F8
+        w("C8",  s.customer_po_no)     # Customer PO No   (input)
+        w("J8",  s.so_no)               # SO No            (input)
+        w("N8",  s.order_date.strftime("%d.%m.%Y"))  # Order Date
+
+        # Row 9
+        w("C9",  s.bitrix_id)           # Bitrix ID        (input)
+        w("F9",  s.customer_type)       # Customer Type    (input)
+        w("J9",  s.contact_person)      # Contact Person   (input)
+        w("N9",  s.contact_mobile)      # Contact Mobile   (input)
+
+        # Rows 11-16 — Bill To / Ship To (all input)
+        w("B11", s.bill_name);    w("I11", s.ship_name)
+        w("B12", s.bill_address); w("I12", s.ship_address)
+        w("B14", s.bill_city);    w("I14", s.ship_city)
+        w("B15", s.bill_pin);     w("I15", s.ship_pin)
+        w("B16", s.bill_gstin);   w("I16", s.ship_gstin)
+
+        # Rows 17-22 — Commercial & Project Info
+        # C17 = formula =IF(C19="Advance ",3%,0%)  →  DO NOT WRITE C17
+        # Write C19 (payment term) → C17 formula auto-resolves in Excel
+        w("C18", s.freight)             # Freight          (input)
+        w("C19", s.payment_term)        # Payment Term     (input) → drives C17 formula
+
+        w("D20", s.consultant_name)     # Consultant       (input)
+        w("L20", s.consultant_contact)  # Consultant Ph    (input)
+        w("D21", s.developer_name)      # Developer        (input)
+        w("L21", s.site_name)           # Site Name        (input)
+        w("C22", s.other_remark)        # Other Remark     (input)
+
+        # ── Line items: ONLY input cols B (item code), G (qty), J (disc%) ─────
+        # Cols C,D,E,F,H,I = VLOOKUP from B → leave as formula
+        # Cols K,L,M,N,O   = computed from I,J,C17 → leave as formula
+        # Clear only col B and G and J for rows 25-99 (so formulas reset cleanly)
+        for r in range(25, 100):
+            for col_letter in ("B", "G", "J"):
+                c = ws[f"{col_letter}{r}"]
+                if not isinstance(c, MergedCell):
+                    c.value = None   # clears input; formula cells in other cols untouched
+
+        # Write only the 3 input columns per item
         for i, item in enumerate(s.line_items):
             r = 25 + i
-            if r > 102:
+            if r > 99:
                 break
-            net_disc = round(1 - (1 - item["disc_pct"]) * (1 - s.cash_discount), 4)
-            net_price = round(item["list_price"] * (1 - net_disc), 2)
-            ws_safe(f"A{r}", i + 1)
-            ws_safe(f"B{r}", item["item_code"])
-            ws_safe(f"C{r}", item["description"])
-            ws_safe(f"D{r}", item["dn"])
-            ws_safe(f"E{r}", item["category"])
-            ws_safe(f"F{r}", item["moq"])
-            ws_safe(f"G{r}", item["qty"])
-            ws_safe(f"H{r}", item["hsn_code"])
-            ws[f"I{r}"] = item["list_price"]
-            ws[f"J{r}"] = item["disc_pct"]
-            ws[f"K{r}"] = s.cash_discount
-            ws[f"L{r}"] = net_disc
-            ws[f"M{r}"] = net_price
-            ws[f"N{r}"] = item["qty"] * net_price
-            ws[f"O{r}"] = item["sub_group"]
+            w(f"B{r}", item["item_code"])                  # triggers all VLOOKUP formulas
+            w(f"G{r}", item["qty"])                        # qty input
+            w(f"J{r}", round(item["disc_pct"], 4))         # disc% input → K,L,M,N recalc
 
-        # Update Dashboard sheet
+        # ── Dashboard sheet (input cells only) ───────────────────────────────
         try:
             wd = wb["Dash Board"]
-            wd["B5"]  = s.so_no
-            wd["B6"]  = s.sales_person
-            wd["B7"]  = s.bill_name
-            wd["B8"]  = s.bill_name
-            wd["B9"]  = s.bill_name
-            wd["B10"] = s.bitrix_id
-            wd["B12"] = s.cash_discount
-            wd["B14"] = s.freight
-            wd["B15"] = s.payment_term
-            wd["B16"] = s.rera_no
+            for addr, val in [
+                ("B5",  s.so_no),
+                ("B6",  s.sales_person),
+                ("B7",  s.bill_name),
+                ("B8",  s.bill_city),
+                ("B9",  s.bill_gstin),
+                ("B10", s.bitrix_id),
+                ("B14", s.freight),
+                ("B15", s.payment_term),
+                ("B16", s.rera_no),
+            ]:
+                c = wd[addr]
+                if not isinstance(c, MergedCell):
+                    c.value = val
         except Exception:
             pass
 
