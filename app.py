@@ -59,59 +59,37 @@ def _get_excel_path():
 
 EXCEL_FILE = _get_excel_path()
 
-# ─── Product Line → Sub Group mapping (from actual Product Master sheet) ────────
-# Sub groups found in data: HT PRO, US SINGLE STACK, US DOUBLE STACK,
-# PERT-AL-PERT, KLIMAPRESS, ROMAFASER, ROMAKLIMA, RED FIRE PRESS, PRESS INOX, etc.
-# ── Auto-derive product families from sub_group data ─────────────────────────
-def _get_family(sg):
-    """Map sub_group name → product family tab name (data-driven)."""
-    u = str(sg).upper().strip()
-    if 'HTPRO' in u or u.startswith('HT ') or u.startswith('HT  ') or 'HT PRO' in u:
-        return 'HT Pro'
-    if u.startswith('US ') or u.startswith('US S') or u.startswith('US D') or 'ULTRA SILENT' in u:
-        return 'Ultra Silent'
-    if u.startswith('PP-R') or u.startswith('PPR'):
-        return 'PP-R / Heliroma'
-    if 'MLCP' in u:
-        return 'MLCP / PERT'
-    if 'RED FIRE' in u:
-        return 'Red Fire'
-    if 'STAINLESS STEEL' in u:
-        return 'Stainless Steel'
-    if any(x in u for x in ['MANIFOLD','BALL VALVE','CONNECTOR BRASS',
-                              'PRESS TOOL','CALIBRATOR','ADAPTER','LUBRICANT']):
-        return 'Tools & Accessories'
-    if any(x in u for x in ['LOCK SEAL','END LOCK','WC CONN','LIP SEAL',
-                              'FLANGE FOR WC','SMART LOCK','NHANI','VENT COWL',
-                              'SHOWER','GRATING','RISER','DWC','TRAP']):
-        return 'Accessories'
-    return 'Other'
+# ── Description-based tab classification ──────────────────────────────────────
+DESC_TABS_DEF = [
+    ("Pipe",        ["PIPE"]),
+    ("Elbow/Bend",  ["ELBOW","BEND"]),
+    ("Tee/Branch",  ["TEE","WYE","BRANCH","DOUBLE Y"]),
+    ("Reducer",     ["REDUCER","REDUCING","REDUCED"]),
+    ("Coupler",     ["COUPLER","SOCKET","COUPLING","REPAIR"]),
+    ("Union",       ["UNION","LOOSE NUT","FLANGE ADAPT","FLANGE ADAPTOR"]),
+    ("Flange",      ["FLANGE","STEEL FLANGE"]),
+    ("Trap",        ["TRAP","SMARTLOCK","SMART LOCK","NHANI"]),
+    ("Valve",       ["VALVE","BALL VALVE","DEMOUNTABLE","STOP COCK"]),
+    ("Clamp",       ["CLAMP"]),
+    ("End Cap",     ["END CAP"]),
+    ("Manifold",    ["MANIFOLD"]),
+    ("Tools",       ["PRESS TOOL","MANUAL PRESS","CALIBRATOR","WELD","BATTERY","ADAPTOR","ADAPTER"]),
+    ("Accessories", ["GASKET","LIP SEAL","LOCK SEAL","END LOCK","WC CONN",
+                     "GRATING","LUBRICANT","WALL PLATE","CHECK NUT","AQUASLIM"]),
+]
 
-# Fitting type filter (applies inside any tab)
-FITTING_TYPES = {
-    "All":         None,
-    "Pipe":        ["PIPE"],
-    "Bend":        ["BEND", "ELBOW"],
-    "Branch":      ["TEE", "WYE", "BRANCH", "DOUBLE Y"],
-    "Trap":        ["TRAP", "NHANI"],
-    "Coupler":     ["COUPLER", "REPAIR", "JOINT", "LOCK SEAL", "END LOCK", "WC CONN"],
-    "Reducer":     ["REDUCER", "ECCENTRIC", "CONCENTRIC"],
-    "Inspection":  ["CLEANING", "ACCESS", "RISER", "BOSS", "VENT", "HAFF"],
-    "Clamp":       ["CLAMP"],
-    "Accessory":   ["GRATING", "FLANGE", "CAP", "LUBRIC", "TOOL",
-                    "CALIBR", "DWC", "CHANNEL", "RING", "GASKET"],
-}
+def _get_fit_tab(desc):
+    d = str(desc).upper()
+    for tab, kws in DESC_TABS_DEF:
+        if any(k in d for k in kws):
+            return tab
+    return "Other"
+
 
 # ─── Helper filters using str.contains (Arrow-safe) ────────────────────────────
 def _kw_mask(series, kws):
     pat = "|".join(re.escape(k) for k in kws)
     return series.astype(str).str.contains(pat, case=False, na=False, regex=True)
-
-def filter_by_type(df, type_key):
-    if type_key == "All" or FITTING_TYPES[type_key] is None:
-        return df
-    kws = FITTING_TYPES[type_key]
-    return df[_kw_mask(df["category"], kws) | _kw_mask(df["description"], kws)]
 
 # ─── Data Loaders ───────────────────────────────────────────────────────────────
 @st.cache_data
@@ -124,7 +102,7 @@ def load_product_master():
     df["list_price"] = pd.to_numeric(df["list_price"], errors="coerce").fillna(0)
     df["dn"] = df["dn"].astype(str).str.replace(r"\.0$","",regex=True).str.strip()
     # Auto-assign family tab based on sub_group name
-    df["family"] = df["sub_group"].apply(_get_family)
+    df["fit_tab"] = df["description"].apply(_get_fit_tab)
     return df
 
 @st.cache_data
@@ -342,29 +320,22 @@ with tab2:
 
     # ── Build tabs dynamically from products_df "family" column ─────────────
     # Family order: most-used first; "Other" always last
-    _family_order = ["All","HT Pro","Ultra Silent","MLCP / PERT",
-                     "PP-R / Heliroma","Red Fire","Stainless Steel",
-                     "Tools & Accessories","Accessories","Other"]
-    # Only include families that actually have data
-    _present = set(products_df["family"].unique())
-    line_options = ["All"] + [f for f in _family_order[1:] if f in _present]
+    # Tab order follows DESC_TABS_DEF
+    _tab_order = ["All"] + [t for t,_ in DESC_TABS_DEF] + ["Other"]
+    _present   = set(products_df["fit_tab"].unique())
+    line_options = [t for t in _tab_order if t == "All" or t in _present]
 
     line_tabs = st.tabs(line_options)
-
-    type_icons = {"All":"🔵","Pipe":"□","Bend":"↩","Branch":"⌥","Trap":"⊔",
-                  "Coupler":"○","Reducer":"◁","Inspection":"⊙","Clamp":"∩","Accessory":"⚙"}
 
     for li, (line_tab, line_key) in enumerate(zip(line_tabs, line_options)):
         with line_tab:
             # Filter by family
-            line_df = products_df if line_key == "All" else products_df[products_df["family"] == line_key]
+            line_df = products_df if line_key == "All" else products_df[products_df["fit_tab"] == line_key]
 
             # ── DN Size Buttons — from actual data in this family ─────────────
             dn_state_key  = f"dn_{li}"
-            type_state_key = f"ft_{li}"
             search_key    = f"sq_{li}"
             if dn_state_key   not in st.session_state: st.session_state[dn_state_key]   = "ALL"
-            if type_state_key not in st.session_state: st.session_state[type_state_key] = "All"
             if search_key     not in st.session_state: st.session_state[search_key]     = ""
 
             # Numeric DNs only (exclude codes like "DWC PIPE SN8", "ADAPTER U63")
@@ -389,26 +360,17 @@ with tab2:
                             type="primary" if st.session_state[dn_state_key]==str(dn) else "secondary"):
                         st.session_state[dn_state_key] = str(dn); st.rerun()
 
-            # ── Fitting Type Pills ────────────────────────────────────────────
-            pill_cols = st.columns(len(FITTING_TYPES))
-            for ti, tkey in enumerate(FITTING_TYPES.keys()):
-                if pill_cols[ti].button(f"{type_icons.get(tkey,'•')} {tkey}",
-                        key=f"ft_{tkey}_{li}",
-                        type="primary" if st.session_state[type_state_key]==tkey else "secondary"):
-                    st.session_state[type_state_key] = tkey; st.rerun()
-
             # ── Search ────────────────────────────────────────────────────────
             sq = st.text_input("s", value=st.session_state[search_key],
                                key=f"cs_{li}", label_visibility="collapsed",
                                placeholder="🔍  Search item code, description, size...")
             st.session_state[search_key] = sq
 
-            # ── Apply all filters ─────────────────────────────────────────────
+            # ── Apply filters ─────────────────────────────────────────────────
             view_df = line_df.copy()
             sel_dn  = st.session_state[dn_state_key]
             if sel_dn != "ALL" and show_dns:
                 view_df = view_df[view_df["dn"] == sel_dn]
-            view_df = filter_by_type(view_df, st.session_state[type_state_key])
             if sq:
                 s2 = sq.lower()
                 view_df = view_df[
