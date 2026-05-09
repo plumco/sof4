@@ -62,38 +62,49 @@ EXCEL_FILE = _get_excel_path()
 # ─── Product Line → Sub Group mapping (from actual Product Master sheet) ────────
 # Sub groups found in data: HT PRO, US SINGLE STACK, US DOUBLE STACK,
 # PERT-AL-PERT, KLIMAPRESS, ROMAFASER, ROMAKLIMA, RED FIRE PRESS, PRESS INOX, etc.
+# Exact sub_group keyword matches from Product Master analysis
 PRODUCT_LINES = {
-    "HT Pro":          ["HT PRO", "HTPRO", "HT-PRO"],
-    "Ultra Silent":    ["US S/S", "US D/S", "US SIN", "US DOU", "ULTRA SILENT", "ULTRA-SILENT"],
-    "PERT-AL-PERT":    ["PERT", "KLIMAPRESS", "MLCP"],
-    "PPR / Heliroma":  ["ROMAFASER", "ROMAKLIMA", "RED FIRE", "PRESS INOX", "PPR"],
-    "Accessories":     ["CLAMP", "TOOL", "LUBRIC", "GASKET", "GRATING", "CHANNEL",
-                        "DWC", "CALIBR", "SHOWER"],
+    "HT Pro":        ["HTPRO", "HT  PRO", "HT PRO", "LOCK SEAL", "END LOCK",
+                      "WC CONNECTOR", "SMART LOCK", "LIP SEAL", "FLANGE FOR WC"],
+    "Ultra Silent":  ["US FITTINGS", "US S/S", "US D/S", "US CLAMP",
+                      "ULTRA SILENT"],
+    "MLCP / PERT":   ["MLCP", "INSULATED MLCP", "MANIFOLD BRASS",
+                      "MANIFOLD CONNECTOR", "BALL VALVE BRASS", "CONNECTOR BRASS",
+                      "PRESS TOOL JAW", "PRESS TOOL WITH", "MANUAL PRESS TOOL",
+                      "CALIBRATOR", "ADAPTER", "LUBRICANT"],
+    "PPR / Heliroma":["PP-R FITTINGS", "PP-R PIPE", "PP-R ELECTRO"],
+    "Red Fire / SS": ["RED FIRE", "STAINLESS STEEL"],
+    "Accessories":   ["SHOWER CHANNEL", "VENT COWL", "DWC PIPE",
+                      "NHANI TRAP", "P TRAP", "S TRAP", "MULTI FLOOR TRAP",
+                      "HT. RISER", "GRATING"],
 }
 
-# Fitting type → keywords in description/category
+# Fitting type filter → keywords in description (applies inside any product line)
 FITTING_TYPES = {
     "All":         None,
     "Pipe":        ["PIPE"],
     "Bend":        ["BEND", "ELBOW"],
-    "Branch":      ["TEE", " Y ", "BRANCH", "DOUBLE Y", "CORNER"],
-    "Trap":        ["TRAP", "SMART LOCK", "NHANI"],
-    "Coupler":     ["COUPLER", "REPAIR", "JOINT", "LOCK SEAL", "END LOCK", "WC CONN", "WC CON"],
+    "Branch":      ["TEE", "WYE", "BRANCH", "DOUBLE Y"],
+    "Trap":        ["TRAP", "NHANI"],
+    "Coupler":     ["COUPLER", "REPAIR", "JOINT", "LOCK SEAL",
+                    "END LOCK", "WC CONN"],
     "Reducer":     ["REDUCER", "ECCENTRIC", "CONCENTRIC"],
-    "Inspection":  ["CLEANING", "ACCESS", "RISER", "BOSS", "VENT", "HAFF", "INSP"],
+    "Inspection":  ["CLEANING", "ACCESS", "RISER", "BOSS", "VENT",
+                    "HAFF", "INSP"],
     "Clamp":       ["CLAMP"],
-    "Accessory":   ["GASKET", "RING", "FLANGE", "CAP", "GRATING", "LUBRIC", "TOOL",
-                    "CALIBR", "DWC", "CHANNEL"],
+    "Accessory":   ["GRATING", "FLANGE", "CAP", "LUBRIC", "TOOL",
+                    "CALIBR", "DWC", "CHANNEL", "RING", "GASKET"],
 }
 
-# DN sets per product line
+# DN buttons per product line — numeric only, from actual data
 DN_MAP = {
-    "HT Pro":        [40, 50, 75, 110, 125, 160, 200],
-    "Ultra Silent":  [50, 75, 110, 125, 160, 200],
-    "PERT-AL-PERT":  [16, 20, 25, 32, 40, 50, 63],
-    "PPR / Heliroma":[20, 25, 32, 40, 50, 63, 75, 90, 110],
-    "Accessories":   [],
     "All":           [40, 50, 75, 110, 125, 160, 200],
+    "HT Pro":        [40, 50, 75, 110, 125, 160, 200],
+    "Ultra Silent":  [40, 50, 75, 110, 125, 160, 200],
+    "MLCP / PERT":   [16, 20, 25, 32, 40, 50, 63],
+    "PPR / Heliroma":[20, 25, 32, 40, 50, 63, 75, 90, 110, 125, 160, 200, 250, 315],
+    "Red Fire / SS": [20, 25, 32, 40, 50, 63, 75, 90, 110, 125, 160],
+    "Accessories":   [],
 }
 
 # ─── Helper filters using str.contains (Arrow-safe) ────────────────────────────
