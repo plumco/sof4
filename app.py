@@ -131,6 +131,9 @@ def load_product_master():
     df.columns = ["item_code","description","dn","moq","list_price",
                   "category","sub_group","hsn_code","gst_rate","cat2"]
     df = df.dropna(subset=["item_code"])
+    df["moq"] = pd.to_numeric(df["moq"], errors="coerce").fillna(1).astype(int)
+    df["list_price"] = pd.to_numeric(df["list_price"], errors="coerce").fillna(0)
+    df["dn"] = df["dn"].astype(str).str.replace(r"\.0$","",regex=True).str.strip()
     return df
 
 @st.cache_data
@@ -294,7 +297,7 @@ with tab2:
         existing  = [i for i, it in enumerate(st.session_state.line_items)
                      if it["item_code"] == row["item_code"]]
         if existing:
-            st.session_state.line_items[existing[0]]["qty"] += int(row["moq"])
+            st.session_state.line_items[existing[0]]["qty"] += int(float(row["moq"])) if pd.notna(row["moq"]) else 1
             st.toast(f"Qty updated: {row['item_code']}", icon="✅")
         else:
             st.session_state.line_items.append({
@@ -303,8 +306,8 @@ with tab2:
                 "dn":          row["dn"],
                 "category":    row["category"],
                 "sub_group":   row["sub_group"],
-                "moq":         int(row["moq"]),
-                "qty":         int(row["moq"]),
+                "moq":         int(float(row["moq"])) if pd.notna(row["moq"]) else 1,
+                "qty":         int(float(row["moq"])) if pd.notna(row["moq"]) else 1,
                 "hsn_code":    row["hsn_code"],
                 "list_price":  float(row["list_price"]),
                 "disc_pct":    disc_val,
@@ -332,7 +335,7 @@ with tab2:
                 unsafe_allow_html=True)
             cols[1].markdown(f"<small>{str(row['sub_group'])[:22]}</small>", unsafe_allow_html=True)
             cols[2].write(str(row["dn"]))
-            cols[3].write(str(int(row["moq"])))
+            cols[3].write(str(int(float(row["moq"]))) if pd.notna(row["moq"]) else "-")
             cols[4].write(f"₹{float(row['list_price']):,.0f}")
             disc_key = f"disc_{row['item_code']}"
             if disc_key not in st.session_state:
@@ -503,7 +506,7 @@ with tab2:
                     st.session_state.line_items.append({
                         "item_code": row["item_code"], "description": row["description"],
                         "dn": row["dn"], "category": row["category"], "sub_group": row["sub_group"],
-                        "moq": int(row["moq"]), "qty": qty, "hsn_code": row["hsn_code"],
+                        "moq": int(float(row["moq"])) if pd.notna(row["moq"]) else 1, "qty": qty, "hsn_code": row["hsn_code"],
                         "list_price": float(row["list_price"]), "disc_pct": disc_val,
                         "cash_disc": cd, "net_disc": net_disc, "net_price": net_price,
                     })
