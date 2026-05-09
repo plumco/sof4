@@ -62,61 +62,50 @@ EXCEL_FILE = _get_excel_path()
 # ─── Product Line → Sub Group mapping (from actual Product Master sheet) ────────
 # Sub groups found in data: HT PRO, US SINGLE STACK, US DOUBLE STACK,
 # PERT-AL-PERT, KLIMAPRESS, ROMAFASER, ROMAKLIMA, RED FIRE PRESS, PRESS INOX, etc.
-# Exact sub_group keyword matches from Product Master analysis
-PRODUCT_LINES = {
-    "HT Pro":        ["HTPRO", "HT  PRO", "HT PRO", "LOCK SEAL", "END LOCK",
-                      "WC CONNECTOR", "SMART LOCK", "LIP SEAL", "FLANGE FOR WC"],
-    "Ultra Silent":  ["US FITTINGS", "US S/S", "US D/S", "US CLAMP",
-                      "ULTRA SILENT"],
-    "MLCP / PERT":   ["MLCP", "INSULATED MLCP", "MANIFOLD BRASS",
-                      "MANIFOLD CONNECTOR", "BALL VALVE BRASS", "CONNECTOR BRASS",
-                      "PRESS TOOL JAW", "PRESS TOOL WITH", "MANUAL PRESS TOOL",
-                      "CALIBRATOR", "ADAPTER", "LUBRICANT"],
-    "PPR / Heliroma":["PP-R FITTINGS", "PP-R PIPE", "PP-R ELECTRO"],
-    "Red Fire / SS": ["RED FIRE", "STAINLESS STEEL"],
-    "Accessories":   ["SHOWER CHANNEL", "VENT COWL", "DWC PIPE",
-                      "NHANI TRAP", "P TRAP", "S TRAP", "MULTI FLOOR TRAP",
-                      "HT. RISER", "GRATING"],
-}
+# ── Auto-derive product families from sub_group data ─────────────────────────
+def _get_family(sg):
+    """Map sub_group name → product family tab name (data-driven)."""
+    u = str(sg).upper().strip()
+    if 'HTPRO' in u or u.startswith('HT ') or u.startswith('HT  ') or 'HT PRO' in u:
+        return 'HT Pro'
+    if u.startswith('US ') or u.startswith('US S') or u.startswith('US D') or 'ULTRA SILENT' in u:
+        return 'Ultra Silent'
+    if u.startswith('PP-R') or u.startswith('PPR'):
+        return 'PP-R / Heliroma'
+    if 'MLCP' in u:
+        return 'MLCP / PERT'
+    if 'RED FIRE' in u:
+        return 'Red Fire'
+    if 'STAINLESS STEEL' in u:
+        return 'Stainless Steel'
+    if any(x in u for x in ['MANIFOLD','BALL VALVE','CONNECTOR BRASS',
+                              'PRESS TOOL','CALIBRATOR','ADAPTER','LUBRICANT']):
+        return 'Tools & Accessories'
+    if any(x in u for x in ['LOCK SEAL','END LOCK','WC CONN','LIP SEAL',
+                              'FLANGE FOR WC','SMART LOCK','NHANI','VENT COWL',
+                              'SHOWER','GRATING','RISER','DWC','TRAP']):
+        return 'Accessories'
+    return 'Other'
 
-# Fitting type filter → keywords in description (applies inside any product line)
+# Fitting type filter (applies inside any tab)
 FITTING_TYPES = {
     "All":         None,
     "Pipe":        ["PIPE"],
     "Bend":        ["BEND", "ELBOW"],
     "Branch":      ["TEE", "WYE", "BRANCH", "DOUBLE Y"],
     "Trap":        ["TRAP", "NHANI"],
-    "Coupler":     ["COUPLER", "REPAIR", "JOINT", "LOCK SEAL",
-                    "END LOCK", "WC CONN"],
+    "Coupler":     ["COUPLER", "REPAIR", "JOINT", "LOCK SEAL", "END LOCK", "WC CONN"],
     "Reducer":     ["REDUCER", "ECCENTRIC", "CONCENTRIC"],
-    "Inspection":  ["CLEANING", "ACCESS", "RISER", "BOSS", "VENT",
-                    "HAFF", "INSP"],
+    "Inspection":  ["CLEANING", "ACCESS", "RISER", "BOSS", "VENT", "HAFF"],
     "Clamp":       ["CLAMP"],
     "Accessory":   ["GRATING", "FLANGE", "CAP", "LUBRIC", "TOOL",
                     "CALIBR", "DWC", "CHANNEL", "RING", "GASKET"],
-}
-
-# DN buttons per product line — numeric only, from actual data
-DN_MAP = {
-    "All":           [40, 50, 75, 110, 125, 160, 200],
-    "HT Pro":        [40, 50, 75, 110, 125, 160, 200],
-    "Ultra Silent":  [40, 50, 75, 110, 125, 160, 200],
-    "MLCP / PERT":   [16, 20, 25, 32, 40, 50, 63],
-    "PPR / Heliroma":[20, 25, 32, 40, 50, 63, 75, 90, 110, 125, 160, 200, 250, 315],
-    "Red Fire / SS": [20, 25, 32, 40, 50, 63, 75, 90, 110, 125, 160],
-    "Accessories":   [],
 }
 
 # ─── Helper filters using str.contains (Arrow-safe) ────────────────────────────
 def _kw_mask(series, kws):
     pat = "|".join(re.escape(k) for k in kws)
     return series.astype(str).str.contains(pat, case=False, na=False, regex=True)
-
-def filter_by_line(df, line_key):
-    if line_key == "All":
-        return df
-    kws = PRODUCT_LINES[line_key]
-    return df[_kw_mask(df["sub_group"], kws) | _kw_mask(df["category"], kws)]
 
 def filter_by_type(df, type_key):
     if type_key == "All" or FITTING_TYPES[type_key] is None:
@@ -134,6 +123,8 @@ def load_product_master():
     df["moq"] = pd.to_numeric(df["moq"], errors="coerce").fillna(1).astype(int)
     df["list_price"] = pd.to_numeric(df["list_price"], errors="coerce").fillna(0)
     df["dn"] = df["dn"].astype(str).str.replace(r"\.0$","",regex=True).str.strip()
+    # Auto-assign family tab based on sub_group name
+    df["family"] = df["sub_group"].apply(_get_family)
     return df
 
 @st.cache_data
@@ -349,122 +340,84 @@ with tab2:
             if cols[6].button("➕ Add", key=f"a_{tab_key}_{row['item_code']}"):
                 add_item(row, disc_val)
 
-    # ── Product Line Tabs (from actual sub_group analysis) ──────────────────
-    line_options = ["All"] + list(PRODUCT_LINES.keys())
-    line_tabs    = st.tabs(line_options)
+    # ── Build tabs dynamically from products_df "family" column ─────────────
+    # Family order: most-used first; "Other" always last
+    _family_order = ["All","HT Pro","Ultra Silent","MLCP / PERT",
+                     "PP-R / Heliroma","Red Fire","Stainless Steel",
+                     "Tools & Accessories","Accessories","Other"]
+    # Only include families that actually have data
+    _present = set(products_df["family"].unique())
+    line_options = ["All"] + [f for f in _family_order[1:] if f in _present]
+
+    line_tabs = st.tabs(line_options)
+
+    type_icons = {"All":"🔵","Pipe":"□","Bend":"↩","Branch":"⌥","Trap":"⊔",
+                  "Coupler":"○","Reducer":"◁","Inspection":"⊙","Clamp":"∩","Accessory":"⚙"}
 
     for li, (line_tab, line_key) in enumerate(zip(line_tabs, line_options)):
         with line_tab:
-            # Base data filtered by product line
-            line_df = filter_by_line(products_df, line_key) if line_key != "All" else products_df
+            # Filter by family
+            line_df = products_df if line_key == "All" else products_df[products_df["family"] == line_key]
 
-            # ── DN Size Buttons ───────────────────────────────────────────────
-            dn_list = DN_MAP.get(line_key, [])
+            # ── DN Size Buttons — from actual data in this family ─────────────
+            dn_state_key  = f"dn_{li}"
+            type_state_key = f"ft_{li}"
+            search_key    = f"sq_{li}"
+            if dn_state_key   not in st.session_state: st.session_state[dn_state_key]   = "ALL"
+            if type_state_key not in st.session_state: st.session_state[type_state_key] = "All"
+            if search_key     not in st.session_state: st.session_state[search_key]     = ""
 
-            # Dynamically get actual DNs present in this line's data
-            actual_dns = sorted(
-                [int(x) for x in line_df["dn"].dropna().unique()
-                 if str(x).isdigit() or (isinstance(x, float) and not str(x).endswith('.0') == False)],
-                key=lambda x: x
-            )
-            # Use intersection of DN_MAP + actual data (show only what exists)
-            if dn_list:
-                show_dns = [d for d in dn_list if any(
-                    abs(float(x) - d) < 0.5
-                    for x in line_df["dn"].dropna()
-                    if str(x).replace('.','',1).isdigit()
-                )]
-            else:
-                show_dns = sorted(set(
-                    int(float(x)) for x in line_df["dn"].dropna()
-                    if str(x).replace('.','',1).isdigit()
-                ))
-
-            dn_state_key = f"cat_dn_{li}"
-            if dn_state_key not in st.session_state:
-                st.session_state[dn_state_key] = "ALL"
+            # Numeric DNs only (exclude codes like "DWC PIPE SN8", "ADAPTER U63")
+            show_dns = sorted(set(
+                int(x) for x in line_df["dn"].dropna()
+                if str(x).isdigit() and 1 < int(x) < 2000
+            ))
 
             if show_dns:
                 st.markdown(
-                    "<p style='font-size:0.78rem;font-weight:700;color:#555;"
-                    "text-transform:uppercase;letter-spacing:1px;margin:0 0 6px'>Select Size (DN)</p>",
+                    "<p style='font-size:0.75rem;font-weight:700;color:#555;"
+                    "text-transform:uppercase;letter-spacing:1px;margin:4px 0 4px'>Select Size (DN)</p>",
                     unsafe_allow_html=True)
-                btn_cols = st.columns(len(show_dns) + 1)
-                all_cnt = len(line_df)
-                if btn_cols[0].button(
-                    f"ALL  {all_cnt}",
-                    key=f"dn_ALL_{li}",
-                    type="primary" if st.session_state[dn_state_key] == "ALL" else "secondary"
-                ):
+                btn_cols = st.columns(min(len(show_dns) + 1, 14))
+                all_cnt  = len(line_df)
+                if btn_cols[0].button(f"ALL {all_cnt}", key=f"dn_ALL_{li}",
+                        type="primary" if st.session_state[dn_state_key]=="ALL" else "secondary"):
                     st.session_state[dn_state_key] = "ALL"; st.rerun()
-                for ci, dn in enumerate(show_dns):
-                    cnt = len(line_df[
-                        line_df["dn"].apply(
-                            lambda x: str(x).replace('.0','') == str(dn)
-                        )
-                    ])
-                    if btn_cols[ci+1].button(
-                        f"DN{dn}  {cnt}",
-                        key=f"dn_{dn}_{li}",
-                        type="primary" if st.session_state[dn_state_key] == str(dn) else "secondary"
-                    ):
+                for ci, dn in enumerate(show_dns[:13]):          # max 13 DN buttons
+                    cnt = int((line_df["dn"] == str(dn)).sum())
+                    if btn_cols[ci+1].button(f"DN{dn} {cnt}", key=f"dn_{dn}_{li}",
+                            type="primary" if st.session_state[dn_state_key]==str(dn) else "secondary"):
                         st.session_state[dn_state_key] = str(dn); st.rerun()
-                st.markdown("")
 
             # ── Fitting Type Pills ────────────────────────────────────────────
-            type_state_key = f"cat_type_{li}"
-            if type_state_key not in st.session_state:
-                st.session_state[type_state_key] = "All"
-
-            type_icons = {
-                "All":"🔵","Pipe":"□","Bend":"↩","Branch":"⌥","Trap":"⊔",
-                "Coupler":"○","Reducer":"◁","Inspection":"⊙","Clamp":"∩","Accessory":"⚙"
-            }
             pill_cols = st.columns(len(FITTING_TYPES))
             for ti, tkey in enumerate(FITTING_TYPES.keys()):
-                ico  = type_icons.get(tkey, "•")
-                active = st.session_state[type_state_key] == tkey
-                if pill_cols[ti].button(
-                    f"{ico} {tkey}",
-                    key=f"ft_{tkey}_{li}",
-                    type="primary" if active else "secondary"
-                ):
+                if pill_cols[ti].button(f"{type_icons.get(tkey,'•')} {tkey}",
+                        key=f"ft_{tkey}_{li}",
+                        type="primary" if st.session_state[type_state_key]==tkey else "secondary"):
                     st.session_state[type_state_key] = tkey; st.rerun()
 
-            # ── Search bar ────────────────────────────────────────────────────
-            search_key = f"cat_search_{li}"
-            if search_key not in st.session_state:
-                st.session_state[search_key] = ""
-            search_q = st.text_input(
-                "search", value=st.session_state[search_key],
-                key=f"cs_{li}", label_visibility="collapsed",
-                placeholder="🔍  Search item code, description, size...")
-            st.session_state[search_key] = search_q
-            st.markdown("")
+            # ── Search ────────────────────────────────────────────────────────
+            sq = st.text_input("s", value=st.session_state[search_key],
+                               key=f"cs_{li}", label_visibility="collapsed",
+                               placeholder="🔍  Search item code, description, size...")
+            st.session_state[search_key] = sq
 
             # ── Apply all filters ─────────────────────────────────────────────
             view_df = line_df.copy()
-
-            # DN filter
-            sel_dn = st.session_state[dn_state_key]
+            sel_dn  = st.session_state[dn_state_key]
             if sel_dn != "ALL" and show_dns:
-                view_df = view_df[
-                    view_df["dn"].apply(lambda x: str(x).replace('.0','') == sel_dn)
-                ]
-
-            # Type filter
+                view_df = view_df[view_df["dn"] == sel_dn]
             view_df = filter_by_type(view_df, st.session_state[type_state_key])
-
-            # Text search
-            if search_q:
-                sq = search_q.lower()
+            if sq:
+                s2 = sq.lower()
                 view_df = view_df[
-                    view_df["item_code"].astype(str).str.lower().str.contains(sq, na=False) |
-                    view_df["description"].astype(str).str.lower().str.contains(sq, na=False) |
-                    view_df["dn"].astype(str).str.lower().str.contains(sq, na=False)
+                    view_df["item_code"].astype(str).str.lower().str.contains(s2, na=False) |
+                    view_df["description"].astype(str).str.lower().str.contains(s2, na=False) |
+                    view_df["dn"].astype(str).str.lower().str.contains(s2, na=False)
                 ]
 
-            render_product_grid(view_df, f"{li}")
+            render_product_grid(view_df, f"t{li}")
 
     st.markdown("---")
 
