@@ -119,7 +119,7 @@ def _kw_mask(series, kws):
     return series.astype(str).str.contains(pat, case=False, na=False, regex=True)
 
 # ─── Data Loaders ───────────────────────────────────────────────────────────────
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def load_product_master():
     df = pd.read_excel(EXCEL_FILE, sheet_name="Product Master", header=0)
     df.columns = ["item_code","description","dn","moq","list_price",
@@ -346,8 +346,10 @@ with tab2:
                 add_item(row, disc_val)
 
     # ── Build tabs dynamically from products_df "family" column ─────────────
-    # Family order: most-used first; "Other" always last
-    # Tab order — exact user requirement
+    # Ensure fit_tab column exists (re-apply if cache dropped it)
+    if "fit_tab" not in products_df.columns:
+        products_df["fit_tab"] = products_df["description"].apply(_get_fit_tab)
+
     _tab_order = ["All","HT Pro","Ultra Silent","MLCP / PERT",
                   "PPR / Heliroma","Red Fire / SS","Accessories"]
     _present   = set(products_df["fit_tab"].unique())
